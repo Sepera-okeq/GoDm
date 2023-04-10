@@ -63,6 +63,8 @@ func (Xc *Config) Captcha(WebKey string) (cap string) {
 		cap = Xc.Capmonster_Solve(WebKey)
 	case "2captcha":
 		cap = Xc.TwoCaptcha_Solve(WebKey)
+	case "anti-captcha":
+		cap = Xc.AntiCaptcha_Solve(WebKey)
 	}
 
 	return cap
@@ -114,6 +116,74 @@ func (Xc *Config) Capmonster_Solve(WebKey string) (cap string) {
 		for {
 			req, err := xhttp.NewRequest("POST",
 				"https://api.capmonster.cloud/getTaskResult",
+				bytes.NewBuffer(
+					Xc.Marsh(
+						map[string]string{
+							"clientKey": Key,
+							"taskId":    strconv.Itoa(task),
+						},
+					),
+				),
+			)
+			Xc.Errs(err)
+
+			resp, err := xhttp.DefaultClient.Do(req)
+			Xc.Errs(err)
+
+			responseBody := make(map[string]interface{})
+			json.NewDecoder(resp.Body).Decode(&responseBody)
+			status := responseBody["status"]
+			Xc.Errs(err)
+			if status == "ready" {
+				cap = responseBody["solution"].(map[string]interface{})["gRecaptchaResponse"].(string)
+				break
+			} else if status == "processing" {
+				continue
+			} else {
+				fmt.Println("[ERR] | ", string(body))
+			}
+		}
+	} else {
+		Xc.Errs(err)
+	}
+
+	return cap
+}
+
+func (Xc *Config) AntiCaptcha_Solve(WebKey string) (cap string) {
+	Key := Xc.Config().Mode.Discord.ApiKey
+	payload := map[string]interface{}{
+		"clientKey": Key,
+		"task": map[string]interface{}{
+			"type":       "HCaptchaTaskProxyless",
+			"userAgent":  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36 Edg/92.0.902.73",
+			"websiteKey": WebKey,
+			"websiteURL": "https://discord.com/",
+		},
+	}
+	req, err := xhttp.NewRequest("POST",
+		"https://api.anti-captcha.com/createTask",
+		bytes.NewBuffer(
+			Xc.Marsh_btn(payload),
+		),
+	)
+	Xc.Errs(err)
+
+	resp, err := xhttp.DefaultClient.Do(req)
+	Xc.Errs(err)
+
+	var data CapmonsterResp
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	err = json.Unmarshal(body, &data)
+	Xc.Errs(err)
+
+	if resp.StatusCode == 200 {
+		task := data.TaskID
+
+		for {
+			req, err := xhttp.NewRequest("POST",
+				"https://api.anti-captcha.com/getTaskResult",
 				bytes.NewBuffer(
 					Xc.Marsh(
 						map[string]string{
